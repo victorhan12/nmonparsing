@@ -1,0 +1,176 @@
+Sub for_nmon()
+'用来统计nmon结果
+
+'2.0改进空间：已修改为，批量加入文件，导入多个文件后，filepath变为数组，然后遍历数组，取出结果，放到一个新excel里
+'选中要统计的文件，可改为多选
+filepath = Excel.Application.GetOpenFilename(Title:="选择要导入的nmon文件", MultiSelect:=True)
+
+'If filepath = False Then
+'    Exit Sub
+'End If
+
+'取当前表格对象
+'Set wkme = Excel.Application.ThisWorkbook
+'wkme.Activate
+
+'清空sheet页
+'wkme.Sheets(3).Range("1:65536").ClearContents
+
+'批量导入表格，循环统计数据后，打印到根目录下新表格中
+Dim excelApp, excelWB As Object
+Dim savePath, saveName As String
+
+Set excelApp = CreateObject("Excel.Application")
+Set excelWB = excelApp.Workbooks.Add
+
+savePath = "C:\Users\user\Desktop\1"
+saveName = "vb_for_nmon.xls"
+excelWB.SaveAs savePath & saveName
+
+excelApp.Quit
+
+'定义一个新表格，用来存统计结果
+Set wknew = Excel.Application.Workbooks.Open(savePath & saveName)
+wknew.Activate
+
+'这个用来根据导入的文件总数，定义统计结果排列顺序
+Dim filecount As Integer
+filecount = 2
+
+'循环导入的文件，统计结果，这里只加了个for循环，改了最后数据打印的位置，中间的计算代码没动
+For Each fname In filepath
+
+    Dim wk As Excel.Workbook
+    Dim ws As Excel.Worksheet
+    Set wsThis = Excel.ActiveSheet
+    
+    Set wk = Excel.Application.Workbooks.Open(fname)
+    
+    '可以手动输入要统计的时间段   若涉及跨日要注意格式 2020/01/05  17:03
+    'sbegintime= InputBox("请输入开始时间:")
+    'sendtime= InputBox("请输入结束时间:")
+    
+    'nmon结果首页默认有起始、结束日期
+    sbegintime = Format(wk.Sheets(1).Cells(1, 5), "hh:mm")
+    sendtime = Format(wk.Sheets(1).Cells(1, 7), "hh:mm")
+    
+    '统计4个结果
+    '若测试有梯度，可根据行数平均分
+    Dim CPU#, MEM#, NET#
+    Dim CPUresult$, MEMresult$, NETresult$
+    
+    '本脚本的核心是，根据时间段，找到行数，用行数取具体值
+    
+    '总行数
+    Dim hrow As Integer
+    
+    '起始行 结束行 需要分梯度时要有差值
+    Dim beginRow%, endRow%, chaTemp%
+    
+    '为了在循环中只取值一次，加了开关，默认0
+    Dim beginRowTemp%, endRowTemp%
+    beginRowTemp = 0
+    endRowTemp = 0
+    
+    '循环拿到sheet页
+    For i = 1 To wk.Sheets.Count
+        sheetName = wk.Sheets(i).Name
+        
+        '取CPU平均值
+        If sheetName = "CPU_ALL" Then
+                    
+            '要统计哪列写哪列，cpu在F，输入开始行、结束行 然后range选中，求平均值 格式化的Fixed表示保留两位小数
+            CPU = Format(Application.Average(wk.Sheets(i).Range("J" & ":J")), "Fixed")
+            '加个%号
+            CPUresult = CPU
+            
+            '若要把行数分成多份  差值定义为integer类型 会自动取整数
+            'chaTemp = (endRow - beginRow) / 5
+            'CPU值也可分段统计
+            'CPU1 = Format(Application.Average(wk.Sheets(i).Range("F" & beginRow & ":F" & beginRow + chaTemp)), "Fixed")
+            'CPU2 = Format(Application.Average(wk.Sheets(i).Range("F" & beginRow + chaTemp & ":F" & beginRow + 2 * chaTemp)), "Fixed")
+        End If
+      
+        
+       
+        '取MEM值 需要先算平均值 再减， 因为是自己加的百分比，所以*100
+        If sheetName = "MEM" Then
+            memtotal = Format(Application.Average(wk.Sheets(i).Range("B" & ":B")), "Fixed")
+            memfree = Format(Application.Average(wk.Sheets(i).Range("F" & ":F")), "Fixed")
+            cache = Format(Application.Average(wk.Sheets(i).Range("K" & ":K")), "Fixed")
+            buffer = Format(Application.Average(wk.Sheets(i).Range("N" & ":N")), "Fixed")
+            MEM = (memtotal - memfree - cache - buffer) / memtotal * 100
+            MEMresult = Format(MEM, "Fixed")
+        End If
+        
+        If sheetName = "NET" Then
+            Dim totalReadAvg As Double
+            Dim totalReadColumn As Range
+            Dim coluName As String
+            Set totalReadColumn = wk.Sheets(i).Rows(1).Find("Total-Read")
+            If Not totalReadColumn Is Nothing Then
+              coluName = totalReadColumn.Address
+              startP = InStr(coluName, "$")
+              coluName = Mid(coluName, startP + 1)
+              endP = InStr(2, coluName, "$")
+              coluName = Mid(coluName, 1, endP - 1)
+              totalReadAvg = Application.Average(wk.Sheets(i).Range(coluName & ":" & coluName))
+            End If
+            coluName = ""
+            Dim totalWriteAvg As Double
+            Dim totalWriteColumn As Range
+            Set totalWriteColumn = wk.Sheets(i).Rows(1).Find("Total-Write (-ve)")
+            If Not totalWriteColumn Is Nothing Then
+              
+              coluName = totalWriteColumn.Address
+              startP = InStr(coluName, "$")
+              coluName = Mid(coluName, startP + 1)
+              endP = InStr(2, coluName, "$")
+              coluName = Mid(coluName, 1, endP - 1)
+              totalWriteAvg = Application.Average(wk.Sheets(i).Range(coluName & ":" & coluName))
+              
+                'totalWriteAvg = Application.Average(wk.Sheets(i).Range("BN2" & ":" & "BN61"))
+            End If
+            NET = (totalReadAvg - totalWriteAvg) / 1280
+            NETresult = NET
+           
+        End If
+        '取IO平均值、最大值
+        '已经有了开始、结束行，后面的就很简单了
+        If sheetname = "DISKBUSY" Then
+            IOavg = Format(Application.Average(wk.Sheets(i).Range("G" & beginRow & ":G" & endRow)), "Fixed")
+            IOavgresult = IOavg & "%"
+            IOmax = Format(Application.Max(wk.Sheets(i).Range("G" & beginRow & ":G" & endRow)), "Fixed")
+            IOmaxresult = IOmax & "%"
+        End If
+        
+        
+    Next i
+'最后把结果打印到首页
+
+'统计完把表格关了
+wk.Close
+
+'把路径名改为文件名保存
+fname2 = Split(fname, "\")
+'UBound取数组最大下标
+fname3 = fname2(UBound(fname2))
+
+wknew.Sheets(1).Cells(filecount, 1) = fname3
+
+wknew.Sheets(1).Cells(1, 2) = "CPU"
+wknew.Sheets(1).Cells(filecount, 2) = CPUresult
+
+wknew.Sheets(1).Cells(1, 3) = "MEM"
+wknew.Sheets(1).Cells(filecount, 3) = MEMresult
+
+wknew.Sheets(1).Cells(1, 4) = "NET"
+wknew.Sheets(1).Cells(filecount, 4) = NETresult
+
+
+filecount = filecount + 1
+Next
+
+End Sub
+
+
